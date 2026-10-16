@@ -57,7 +57,7 @@ public class MainActivity extends Activity {
     private static final int CORNER = 6;      // px radius kecil
 
     private TextView tvStatus, tvCount, tvHistoryEmpty;
-    private EditText etWebhook, etSearch;
+    private EditText etWebhook, etSearch, etToken;
     private LinearLayout appList, historyList, selectedChips;
     private LinearLayout tabStatus, tabApps, tabHistory;
     private Button tabBtnStatus, tabBtnApps, tabBtnHistory;
@@ -320,6 +320,24 @@ public class MainActivity extends Activity {
         etWebhook.setPadding(20, 18, 20, 18);
         wbInner.addView(etWebhook);
 
+        TextView lblToken = new TextView(this);
+        lblToken.setText("TOKEN (SAMAKAN DENGAN SERVER)");
+        lblToken.setTextSize(12);
+        lblToken.setTextColor(BLACK);
+        lblToken.setTypeface(lblToken.getTypeface(), Typeface.BOLD);
+        lblToken.setPadding(4, 18, 0, 6);
+        wbInner.addView(lblToken);
+
+        etToken = new EditText(this);
+        etToken.setHint("Token rahasia...");
+        etToken.setTextSize(14);
+        etToken.setTextColor(BLACK);
+        etToken.setBackground(brutalBox(LIGHT_GRAY));
+        etToken.setPadding(20, 18, 20, 18);
+        etToken.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        wbInner.addView(etToken);
+
         LinearLayout wbBtns = new LinearLayout(this);
         wbBtns.setOrientation(LinearLayout.HORIZONTAL);
         wbBtns.setPadding(0, 16, 0, 0);
@@ -340,6 +358,7 @@ public class MainActivity extends Activity {
         SharedPreferences prefs = getSharedPreferences("cfg", MODE_PRIVATE);
         etWebhook.setText(prefs.getString("webhook",
                 "https://gopay.wandalo.dev/api/notif"));
+        etToken.setText(prefs.getString("webhook_token", ""));
         btnSave.setOnClickListener(v -> savePrefs());
         btnTest.setOnClickListener(v -> testWebhook());
     }
@@ -460,6 +479,7 @@ public class MainActivity extends Activity {
         }
         getSharedPreferences("cfg", MODE_PRIVATE).edit()
                 .putString("webhook", etWebhook.getText().toString().trim())
+                .putString("webhook_token", etToken.getText().toString().trim())
                 .putStringSet("apps", sel).apply();
         Toast.makeText(this, sel.size() + " aplikasi tersimpan",
                 Toast.LENGTH_SHORT).show();
@@ -711,6 +731,7 @@ public class MainActivity extends Activity {
 
     private void testWebhook() {
         String url = etWebhook.getText().toString().trim();
+        String token = etToken.getText().toString().trim();
         new Thread(() -> {
             try {
                 java.net.URL u = new java.net.URL(url);
@@ -720,7 +741,8 @@ public class MainActivity extends Activity {
                 c.setRequestProperty("Content-Type", "application/json");
                 c.setConnectTimeout(10000);
                 c.setDoOutput(true);
-                String p = "{\"source\":\"TEST\",\"title\":\"Tes koneksi\"," +
+                String p = "{\"token\":" + jsonStr(token) +
+                        ",\"source\":\"TEST\",\"title\":\"Tes koneksi\"," +
                         "\"text\":\"Koneksi OK Rp1.000\",\"amount\":1000,\"time\":" +
                         System.currentTimeMillis() + "}";
                 c.getOutputStream().write(p.getBytes("UTF-8"));
@@ -733,6 +755,12 @@ public class MainActivity extends Activity {
                         "Gagal: " + e.getMessage(), Toast.LENGTH_LONG).show());
             }
         }).start();
+    }
+
+    private static String jsonStr(String s) {
+        if (s == null) s = "";
+        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"")
+                .replace("\n", "\\n").replace("\r", "") + "\"";
     }
 
     private boolean isListenerEnabled() {

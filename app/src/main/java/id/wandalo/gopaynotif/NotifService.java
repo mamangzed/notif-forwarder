@@ -65,9 +65,11 @@ public class NotifService extends NotificationListenerService {
 
         String webhook = prefs.getString("webhook", "");
         if (webhook.isEmpty()) return;
+        String token = prefs.getString("webhook_token", "");
 
         final long finalAmount = amount;
-        final String payload = "{\"source\":" + jsonStr(appName) +
+        final String payload = "{\"token\":" + jsonStr(token) +
+                ",\"source\":" + jsonStr(appName) +
                 ",\"package\":" + jsonStr(pkg) +
                 ",\"title\":" + jsonStr(title) +
                 ",\"text\":" + jsonStr(body) +
