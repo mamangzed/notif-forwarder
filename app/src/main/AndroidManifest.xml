@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="id.wandalo.gopaynotif"
-    android:versionCode="4"
-    android:versionName="1.3">
+    android:versionCode="13"
+    android:versionName="13">
 
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34"/>
 
@@ -12,6 +12,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"/>
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
 
     <application
         android:label="Notif Forwarder"
@@ -31,5 +32,13 @@
                 <action android:name="android.service.notification.NotificationListenerService"/>
             </intent-filter>
         </service>
+        <receiver android:name=".HeartbeatReceiver"
+            android:exported="false"/>
+        <receiver android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

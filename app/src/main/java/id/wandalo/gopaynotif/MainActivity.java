@@ -57,7 +57,11 @@ public class MainActivity extends Activity {
     private static final int CORNER = 6;      // px radius kecil
 
     private TextView tvStatus, tvCount, tvHistoryEmpty;
+    private TextView tvLastSent, tvServerStatus, tvStats, tvPending;
     private EditText etWebhook, etSearch, etToken;
+    private EditText etDeviceName, etMinAmount, etKeywords;
+    private View serverDot;
+    private LinearLayout tutorialBox;
     private LinearLayout appList, historyList, selectedChips;
     private LinearLayout tabStatus, tabApps, tabHistory;
     private Button tabBtnStatus, tabBtnApps, tabBtnHistory;
@@ -137,12 +141,29 @@ public class MainActivity extends Activity {
         header.setPadding(4, 0, 0, 2);
         root.addView(header);
 
+        String verName = "13";
+        try {
+            verName = getPackageManager()
+                    .getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception ignored) {}
+
         TextView subtitle = new TextView(this);
-        subtitle.setText("Teruskan notifikasi ke server. Realtime.");
+        subtitle.setText("Teruskan notifikasi ke server. Realtime. v" + verName);
         subtitle.setTextSize(14);
         subtitle.setTextColor(GRAY);
         subtitle.setPadding(4, 0, 0, 20);
         root.addView(subtitle);
+
+        // Jadwalkan heartbeat + minta izin notifikasi (Android 13+)
+        HeartbeatReceiver.schedule(this);
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            if (checkSelfPermission(
+                    android.Manifest.permission.POST_NOTIFICATIONS)
+                    != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{
+                        android.Manifest.permission.POST_NOTIFICATIONS}, 1001);
+            }
+        }
 
         // Tab bar
         LinearLayout tabBar = new LinearLayout(this);
@@ -249,7 +270,42 @@ public class MainActivity extends Activity {
     // ---------- TAB: STATUS ----------
 
     private void buildTabStatus() {
-        // Kartu status
+        SharedPreferences prefs = getSharedPreferences("cfg", MODE_PRIVATE);
+
+        // --- Tutorial (hanya sampai ditekan MENGERTI) ---
+        if (!prefs.getBoolean("tutorial_done", false)) {
+            LinearLayout tutInner = new LinearLayout(this);
+            tutInner.setOrientation(LinearLayout.VERTICAL);
+            tutInner.setBackground(brutalBox(YELLOW));
+            tutInner.setPadding(28, 28, 28, 28);
+            TextView tutTitle = new TextView(this);
+            tutTitle.setText("PANDUAN SINGKAT");
+            tutTitle.setTextSize(16);
+            tutTitle.setTextColor(BLACK);
+            tutTitle.setTypeface(tutTitle.getTypeface(), Typeface.BOLD);
+            tutInner.addView(tutTitle);
+            TextView tutBody = new TextView(this);
+            tutBody.setText("1. Tekan BERI IZIN lalu aktifkan Notif Forwarder\n" +
+                    "2. Isi webhook, token, dan nama perangkat\n" +
+                    "3. Buka tab APLIKASI, pilih aplikasi, tekan SIMPAN\n" +
+                    "4. Tekan TEST, cek dashboard dalam 2 detik");
+            tutBody.setTextSize(14);
+            tutBody.setTextColor(BLACK);
+            tutBody.setPadding(0, 12, 0, 12);
+            tutInner.addView(tutBody);
+            Button tutOk = miniButton("MENGERTI", BLACK);
+            tutOk.setOnClickListener(v -> {
+                prefs.edit().putBoolean("tutorial_done", true).apply();
+                tutorialBox.setVisibility(View.GONE);
+            });
+            tutInner.addView(tutOk);
+            tutorialBox = new LinearLayout(this);
+            tutorialBox.setOrientation(LinearLayout.VERTICAL);
+            tutorialBox.addView(brutalWrap(tutInner));
+            tabStatus.addView(tutorialBox);
+        }
+
+        // Kartu status izin
         LinearLayout cardInner = new LinearLayout(this);
         cardInner.setOrientation(LinearLayout.VERTICAL);
         cardInner.setBackground(brutalBox(WHITE));
@@ -275,6 +331,26 @@ public class MainActivity extends Activity {
         statusRow.addView(tvStatus);
         cardInner.addView(statusRow);
 
+        // Baris status server
+        LinearLayout srvRow = new LinearLayout(this);
+        srvRow.setOrientation(LinearLayout.HORIZONTAL);
+        srvRow.setGravity(Gravity.CENTER_VERTICAL);
+        srvRow.setPadding(0, 14, 0, 0);
+        serverDot = new View(this);
+        LinearLayout.LayoutParams sdotLp =
+                new LinearLayout.LayoutParams(36, 36);
+        sdotLp.setMargins(0, 0, 20, 0);
+        serverDot.setLayoutParams(sdotLp);
+        paintDot(serverDot, GRAY);
+        tvServerStatus = new TextView(this);
+        tvServerStatus.setText("SERVER: MENGECEK...");
+        tvServerStatus.setTextSize(15);
+        tvServerStatus.setTextColor(BLACK);
+        tvServerStatus.setTypeface(tvServerStatus.getTypeface(), Typeface.BOLD);
+        srvRow.addView(serverDot);
+        srvRow.addView(tvServerStatus);
+        cardInner.addView(srvRow);
+
         TextView hint = new TextView(this);
         hint.setText("Aplikasi membaca notifikasi dari aplikasi yang dipilih, " +
                 "lalu mengirimkannya ke webhook secara langsung.");
@@ -284,8 +360,30 @@ public class MainActivity extends Activity {
         cardInner.addView(hint);
 
         tabStatus.addView(brutalWrap(cardInner));
-        // simpan dot untuk update
         cardInner.setTag(dot);
+
+        // Kartu terakhir terkirim
+        LinearLayout lastInner = new LinearLayout(this);
+        lastInner.setOrientation(LinearLayout.VERTICAL);
+        lastInner.setBackground(brutalBox(WHITE));
+        lastInner.setPadding(28, 24, 28, 24);
+        TextView lastLbl = new TextView(this);
+        lastLbl.setText("TERAKHIR TERKIRIM");
+        lastLbl.setTextSize(12);
+        lastLbl.setTextColor(BLACK);
+        lastLbl.setTypeface(lastLbl.getTypeface(), Typeface.BOLD);
+        lastInner.addView(lastLbl);
+        tvLastSent = new TextView(this);
+        tvLastSent.setTextSize(14);
+        tvLastSent.setTextColor(BLACK);
+        tvLastSent.setPadding(0, 8, 0, 0);
+        lastInner.addView(tvLastSent);
+        tvPending = new TextView(this);
+        tvPending.setTextSize(13);
+        tvPending.setTypeface(tvPending.getTypeface(), Typeface.BOLD);
+        tvPending.setPadding(0, 8, 0, 0);
+        lastInner.addView(tvPending);
+        tabStatus.addView(brutalWrap(lastInner));
 
         tabStatus.addView(actionButton("Beri Izin Baca Notifikasi", BLUE, v -> {
             startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
@@ -305,6 +403,9 @@ public class MainActivity extends Activity {
             }
         }));
 
+        tabStatus.addView(actionButton("Panduan Autostart Xiaomi", PINK, v ->
+                openAutostartSettings()));
+
         // Webhook
         tabStatus.addView(sectionLabel("WEBHOOK SERVER"));
         LinearLayout wbInner = new LinearLayout(this);
@@ -312,6 +413,7 @@ public class MainActivity extends Activity {
         wbInner.setBackground(brutalBox(WHITE));
         wbInner.setPadding(28, 28, 28, 28);
 
+        wbInner.addView(fieldLabel("URL WEBHOOK"));
         etWebhook = new EditText(this);
         etWebhook.setHint("https://...");
         etWebhook.setTextSize(14);
@@ -320,14 +422,19 @@ public class MainActivity extends Activity {
         etWebhook.setPadding(20, 18, 20, 18);
         wbInner.addView(etWebhook);
 
-        TextView lblToken = new TextView(this);
-        lblToken.setText("TOKEN (SAMAKAN DENGAN SERVER)");
-        lblToken.setTextSize(12);
-        lblToken.setTextColor(BLACK);
-        lblToken.setTypeface(lblToken.getTypeface(), Typeface.BOLD);
-        lblToken.setPadding(4, 18, 0, 6);
-        wbInner.addView(lblToken);
+        wbInner.addView(fieldLabel("NAMA PERANGKAT"));
+        etDeviceName = new EditText(this);
+        etDeviceName.setHint("cth: Kasir 1");
+        etDeviceName.setTextSize(14);
+        etDeviceName.setTextColor(BLACK);
+        etDeviceName.setBackground(brutalBox(LIGHT_GRAY));
+        etDeviceName.setPadding(20, 18, 20, 18);
+        wbInner.addView(etDeviceName);
 
+        wbInner.addView(fieldLabel("TOKEN (SAMAKAN DENGAN SERVER)"));
+        LinearLayout tokenRow = new LinearLayout(this);
+        tokenRow.setOrientation(LinearLayout.HORIZONTAL);
+        tokenRow.setGravity(Gravity.CENTER_VERTICAL);
         etToken = new EditText(this);
         etToken.setHint("Token rahasia...");
         etToken.setTextSize(14);
@@ -336,7 +443,24 @@ public class MainActivity extends Activity {
         etToken.setPadding(20, 18, 20, 18);
         etToken.setInputType(android.text.InputType.TYPE_CLASS_TEXT
                 | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        wbInner.addView(etToken);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        tlp.setMargins(0, 0, 12, 0);
+        etToken.setLayoutParams(tlp);
+        Button btnPeek = miniButton("LIHAT", YELLOW);
+        btnPeek.setOnClickListener(v -> {
+            boolean showing = etToken.getInputType()
+                    == android.text.InputType.TYPE_CLASS_TEXT;
+            etToken.setInputType(showing
+                    ? (android.text.InputType.TYPE_CLASS_TEXT
+                    | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD)
+                    : android.text.InputType.TYPE_CLASS_TEXT);
+            etToken.setSelection(etToken.getText().length());
+            btnPeek.setText(showing ? "LIHAT" : "TUTUP");
+        });
+        tokenRow.addView(etToken);
+        tokenRow.addView(btnPeek);
+        wbInner.addView(tokenRow);
 
         LinearLayout wbBtns = new LinearLayout(this);
         wbBtns.setOrientation(LinearLayout.HORIZONTAL);
@@ -355,12 +479,130 @@ public class MainActivity extends Activity {
         wbInner.addView(wbBtns);
         tabStatus.addView(brutalWrap(wbInner));
 
-        SharedPreferences prefs = getSharedPreferences("cfg", MODE_PRIVATE);
         etWebhook.setText(prefs.getString("webhook",
                 "https://gopay.wandalo.dev/api/notif"));
         etToken.setText(prefs.getString("webhook_token", ""));
+        etDeviceName.setText(prefs.getString("device_name",
+                android.os.Build.MODEL));
         btnSave.setOnClickListener(v -> savePrefs());
         btnTest.setOnClickListener(v -> testWebhook());
+
+        // Filter
+        tabStatus.addView(sectionLabel("FILTER NOTIFIKASI"));
+        LinearLayout fInner = new LinearLayout(this);
+        fInner.setOrientation(LinearLayout.VERTICAL);
+        fInner.setBackground(brutalBox(WHITE));
+        fInner.setPadding(28, 28, 28, 28);
+
+        fInner.addView(fieldLabel("NOMINAL MINIMAL (RP, 0 = SEMUA)"));
+        etMinAmount = new EditText(this);
+        etMinAmount.setHint("0");
+        etMinAmount.setTextSize(14);
+        etMinAmount.setTextColor(BLACK);
+        etMinAmount.setBackground(brutalBox(LIGHT_GRAY));
+        etMinAmount.setPadding(20, 18, 20, 18);
+        etMinAmount.setInputType(
+                android.text.InputType.TYPE_CLASS_NUMBER);
+        fInner.addView(etMinAmount);
+
+        fInner.addView(fieldLabel("KATA KUNCI (PISAH KOMA, KOSONG = SEMUA)"));
+        etKeywords = new EditText(this);
+        etKeywords.setHint("cth: diterima, berhasil");
+        etKeywords.setTextSize(14);
+        etKeywords.setTextColor(BLACK);
+        etKeywords.setBackground(brutalBox(LIGHT_GRAY));
+        etKeywords.setPadding(20, 18, 20, 18);
+        fInner.addView(etKeywords);
+
+        Button btnSaveFilter = miniButton("SIMPAN FILTER", GREEN);
+        LinearLayout.LayoutParams flp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        flp.setMargins(0, 16, 0, 0);
+        btnSaveFilter.setLayoutParams(flp);
+        btnSaveFilter.setOnClickListener(v -> savePrefs());
+        fInner.addView(btnSaveFilter);
+        tabStatus.addView(brutalWrap(fInner));
+
+        etMinAmount.setText(prefs.getString("min_amount", "0"));
+        etKeywords.setText(prefs.getString("keywords", ""));
+    }
+
+    private TextView fieldLabel(String t) {
+        TextView tv = new TextView(this);
+        tv.setText(t);
+        tv.setTextSize(12);
+        tv.setTextColor(BLACK);
+        tv.setTypeface(tv.getTypeface(), Typeface.BOLD);
+        tv.setPadding(4, 18, 0, 6);
+        return tv;
+    }
+
+    private void paintDot(View dot, int color) {
+        android.graphics.drawable.GradientDrawable d =
+                new android.graphics.drawable.GradientDrawable();
+        d.setColor(color);
+        d.setStroke(BORDER, BLACK);
+        dot.setBackground(d);
+    }
+
+    /** Coba buka pengaturan autostart MIUI, fallback ke info aplikasi. */
+    private void openAutostartSettings() {
+        try {
+            Intent i = new Intent();
+            i.setComponent(new android.content.ComponentName(
+                    "com.miui.securitycenter",
+                    "com.miui.permcenter.autostart.AutoStartManagementActivity"));
+            startActivity(i);
+            Toast.makeText(this, "Aktifkan autostart untuk Notif Forwarder",
+                    Toast.LENGTH_LONG).show();
+        } catch (Exception e1) {
+            try {
+                Intent i = new Intent();
+                i.setComponent(new android.content.ComponentName(
+                        "com.miui.securitycenter",
+                        "com.miui.securitycenter.MainActivity"));
+                startActivity(i);
+            } catch (Exception e2) {
+                Intent i = new Intent(
+                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                i.setData(android.net.Uri.parse("package:" + getPackageName()));
+                startActivity(i);
+                Toast.makeText(this,
+                        "Cari menu Autostart/Baterai di info aplikasi",
+                        Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    /** Cek koneksi ke server (GET halaman utama). */
+    private void checkServer() {
+        tvServerStatus.setText("SERVER: MENGECEK...");
+        paintDot(serverDot, GRAY);
+        new Thread(() -> {
+            boolean ok = false;
+            try {
+                String webhook = getSharedPreferences("cfg", MODE_PRIVATE)
+                        .getString("webhook", "");
+                if (!webhook.isEmpty()) {
+                    java.net.URL u = new java.net.URL(webhook);
+                    String base = u.getProtocol() + "://" + u.getHost()
+                            + (u.getPort() > 0 ? ":" + u.getPort() : "");
+                    java.net.HttpURLConnection c = (java.net.HttpURLConnection)
+                            new java.net.URL(base + "/").openConnection();
+                    c.setConnectTimeout(8000);
+                    c.setReadTimeout(8000);
+                    ok = c.getResponseCode() == 200;
+                    c.disconnect();
+                }
+            } catch (Exception ignored) {}
+            final boolean res = ok;
+            runOnUiThread(() -> {
+                tvServerStatus.setText(res ? "SERVER: TERHUBUNG"
+                        : "SERVER: TIDAK TERJANGKAU");
+                paintDot(serverDot, res ? GREEN : PINK);
+            });
+        }).start();
     }
 
     private Button miniButton(String text, int fill) {
@@ -446,6 +688,25 @@ public class MainActivity extends Activity {
     private void buildTabHistory() {
         tabHistory.addView(sectionLabel("RIWAYAT NOTIFIKASI"));
 
+        // Kartu statistik hari ini
+        LinearLayout statInner = new LinearLayout(this);
+        statInner.setOrientation(LinearLayout.VERTICAL);
+        statInner.setBackground(brutalBox(BLUE));
+        statInner.setPadding(28, 24, 28, 24);
+        TextView statLbl = new TextView(this);
+        statLbl.setText("HARI INI");
+        statLbl.setTextSize(12);
+        statLbl.setTextColor(WHITE);
+        statLbl.setTypeface(statLbl.getTypeface(), Typeface.BOLD);
+        statInner.addView(statLbl);
+        tvStats = new TextView(this);
+        tvStats.setTextSize(16);
+        tvStats.setTextColor(WHITE);
+        tvStats.setTypeface(tvStats.getTypeface(), Typeface.BOLD);
+        tvStats.setPadding(0, 8, 0, 0);
+        statInner.addView(tvStats);
+        tabHistory.addView(brutalWrap(statInner));
+
         tvHistoryEmpty = new TextView(this);
         tvHistoryEmpty.setText("Belum ada notifikasi.");
         tvHistoryEmpty.setTextColor(GRAY);
@@ -477,14 +738,27 @@ public class MainActivity extends Activity {
         for (AppRow r : rows) {
             if (r.box != null && r.box.isChecked()) sel.add(r.pkg);
         }
+        // Validasi nominal minimal
+        String minAmt = etMinAmount.getText().toString().trim();
+        if (minAmt.isEmpty()) minAmt = "0";
+        try {
+            if (Long.parseLong(minAmt) < 0) minAmt = "0";
+        } catch (Exception e) {
+            minAmt = "0";
+        }
         getSharedPreferences("cfg", MODE_PRIVATE).edit()
                 .putString("webhook", etWebhook.getText().toString().trim())
                 .putString("webhook_token", etToken.getText().toString().trim())
+                .putString("device_name",
+                        etDeviceName.getText().toString().trim())
+                .putString("min_amount", minAmt)
+                .putString("keywords", etKeywords.getText().toString().trim())
                 .putStringSet("apps", sel).apply();
         Toast.makeText(this, sel.size() + " aplikasi tersimpan",
                 Toast.LENGTH_SHORT).show();
         updateSelected();
         updateCount();
+        checkServer();
     }
 
     private void savePrefsSilent() {
@@ -652,7 +926,12 @@ public class MainActivity extends Activity {
     /** Tiap riwayat jadi kartu brutal sendiri. */
     private void loadHistory() {
         historyList.removeAllViews();
-        List<HistoryDb.Entry> entries = new HistoryDb(this).list(30);
+        HistoryDb hdb = new HistoryDb(this);
+        long[] stats = hdb.todayStats();
+        String totalStr = "Rp " + String.format(Locale.getDefault(),
+                "%,d", stats[1]).replace(',', '.');
+        tvStats.setText(stats[0] + " transaksi\n" + totalStr);
+        List<HistoryDb.Entry> entries = hdb.list(30);
         tvHistoryEmpty.setVisibility(entries.isEmpty() ? View.VISIBLE : View.GONE);
         // Sembunyikan kartu empty bila ada isi
         ((View) tvHistoryEmpty.getParent().getParent())
@@ -781,10 +1060,24 @@ public class MainActivity extends Activity {
             // cardInner adalah FrameLayout content; dot ada di statusRow
             LinearLayout statusRow = (LinearLayout) cardInner.getChildAt(0);
             View dot = statusRow.getChildAt(0);
-            GradientDrawable d = new GradientDrawable();
-            d.setColor(enabled ? GREEN : PINK);
-            d.setStroke(BORDER, BLACK);
-            dot.setBackground(d);
+            paintDot(dot, enabled ? GREEN : PINK);
         } catch (Exception ignored) {}
+
+        // Terakhir terkirim + antrean
+        SharedPreferences prefs = getSharedPreferences("cfg", MODE_PRIVATE);
+        String last = prefs.getString("last_sent", null);
+        tvLastSent.setText(last != null ? last : "Belum ada pengiriman.");
+        int pending = new PendingDb(this).count();
+        if (pending > 0) {
+            tvPending.setText("ANTREAN: " + pending + " belum terkirim");
+            tvPending.setTextColor(PINK);
+        } else {
+            tvPending.setText("ANTREAN KOSONG");
+            tvPending.setTextColor(GREEN);
+        }
+
+        // Cek server + flush antrean di background
+        checkServer();
+        new Thread(() -> Webhook.flushPending(this)).start();
     }
 }

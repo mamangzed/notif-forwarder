@@ -4,22 +4,20 @@ import android.app.Notification;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
 
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * Baca notifikasi dari aplikasi terpilih, parse nominal otomatis,
- * teruskan ke webhook. Tetap jalan walau layar mati (system-managed).
+ * filter (nominal min + kata kunci), teruskan ke webhook.
+ * Gagal kirim -> masuk antrean offline, dicoba lagi otomatis.
  */
 public class NotifService extends NotificationListenerService {
     private static final String TAG = "NotifForwarder";
@@ -56,6 +54,34 @@ public class NotifService extends NotificationListenerService {
         long amount = parseAmount(body);
         if (amount == 0) amount = parseAmount(title);
 
+        // Filter: nominal minimal
+        long minAmount = 0;
+        try {
+            minAmount = Long.parseLong(prefs.getString("min_amount", "0"));
+        } catch (Exception ignored) {}
+        if (minAmount > 0 && amount < minAmount) {
+            Log.i(TAG, "Difilter (min Rp" + minAmount + "): " + title);
+            return;
+        }
+
+        // Filter: kata kunci (kosong = semua lolos)
+        String kwRaw = prefs.getString("keywords", "").trim();
+        if (!kwRaw.isEmpty()) {
+            String hay = (title + " " + body).toLowerCase();
+            boolean hit = false;
+            for (String kw : kwRaw.split(",")) {
+                kw = kw.trim().toLowerCase();
+                if (!kw.isEmpty() && hay.contains(kw)) {
+                    hit = true;
+                    break;
+                }
+            }
+            if (!hit) {
+                Log.i(TAG, "Difilter (kata kunci): " + title);
+                return;
+            }
+        }
+
         Log.i(TAG, "[" + appName + "] " + title + " | " + body + " | Rp" + amount);
 
         // Simpan ke history lokal
@@ -66,35 +92,35 @@ public class NotifService extends NotificationListenerService {
         String webhook = prefs.getString("webhook", "");
         if (webhook.isEmpty()) return;
         String token = prefs.getString("webhook_token", "");
+        String deviceId = Webhook.deviceId(this);
+        String deviceName = prefs.getString("device_name", Build.MODEL);
 
-        final long finalAmount = amount;
-        final String payload = "{\"token\":" + jsonStr(token) +
-                ",\"source\":" + jsonStr(appName) +
-                ",\"package\":" + jsonStr(pkg) +
-                ",\"title\":" + jsonStr(title) +
-                ",\"text\":" + jsonStr(body) +
-                ",\"amount\":" + finalAmount +
+        final String payload = "{\"token\":" + Webhook.jsonStr(token) +
+                ",\"device_id\":" + Webhook.jsonStr(deviceId) +
+                ",\"device_name\":" + Webhook.jsonStr(deviceName) +
+                ",\"source\":" + Webhook.jsonStr(appName) +
+                ",\"package\":" + Webhook.jsonStr(pkg) +
+                ",\"title\":" + Webhook.jsonStr(title) +
+                ",\"text\":" + Webhook.jsonStr(body) +
+                ",\"amount\":" + amount +
                 ",\"time\":" + System.currentTimeMillis() + "}";
 
-        // Kirim langsung tanpa delay (realtime)
+        final String desc = appName + " Rp" +
+                String.format("%,d", amount).replace(',', '.');
+
+        // Kirim langsung (realtime); gagal -> antrean
         new Thread(() -> {
-            try {
-                URL url = new URL(webhook);
-                HttpURLConnection c = (HttpURLConnection) url.openConnection();
-                c.setRequestMethod("POST");
-                c.setRequestProperty("Content-Type", "application/json");
-                c.setConnectTimeout(8000);
-                c.setReadTimeout(8000);
-                c.setDoOutput(true);
-                byte[] data = payload.getBytes(StandardCharsets.UTF_8);
-                c.setFixedLengthStreamingMode(data.length);
-                try (OutputStream os = c.getOutputStream()) {
-                    os.write(data);
-                }
-                Log.i(TAG, "Webhook terkirim: " + c.getResponseCode());
-                c.disconnect();
-            } catch (Exception e) {
-                Log.e(TAG, "Gagal kirim webhook: " + e.getMessage());
+            // Coba kirim antrean lama dulu
+            Webhook.flushPending(NotifService.this);
+            int code = Webhook.send(NotifService.this, webhook, payload);
+            if (code == 200) {
+                Webhook.markSent(NotifService.this, desc);
+            } else {
+                new PendingDb(NotifService.this)
+                        .add(payload, System.currentTimeMillis());
+                Webhook.notifyFailure(NotifService.this,
+                        "1 notifikasi " + appName + " belum terkirim");
+                Log.w(TAG, "Masuk antrean, code=" + code);
             }
         }).start();
     }
@@ -105,6 +131,8 @@ public class NotifService extends NotificationListenerService {
         Log.i(TAG, "Listener connected");
         getSharedPreferences("cfg", MODE_PRIVATE)
                 .edit().putBoolean("listener_ok", true).apply();
+        // Flush antrean saat listener tersambung
+        new Thread(() -> Webhook.flushPending(this)).start();
     }
 
     @Override
@@ -113,7 +141,6 @@ public class NotifService extends NotificationListenerService {
         Log.w(TAG, "Listener disconnected, minta rebind");
         getSharedPreferences("cfg", MODE_PRIVATE)
                 .edit().putBoolean("listener_ok", false).apply();
-        // Minta sistem rebind
         requestRebind(new android.content.ComponentName(this, NotifService.class));
     }
 
@@ -124,7 +151,6 @@ public class NotifService extends NotificationListenerService {
         if (!m.find()) return 0;
         try {
             String num = m.group(1);
-            // Hilangkan pemisah ribuan (titik), ubah koma jadi titik desimal
             num = num.replace(".", "");
             if (num.contains(",")) {
                 num = num.replace(",", ".");
@@ -145,11 +171,5 @@ public class NotifService extends NotificationListenerService {
         } catch (Exception e) {
             return pkg;
         }
-    }
-
-    private static String jsonStr(String s) {
-        if (s == null) s = "";
-        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"")
-                .replace("\n", "\\n").replace("\r", "") + "\"";
     }
 }

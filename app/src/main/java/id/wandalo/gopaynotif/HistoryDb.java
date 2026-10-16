@@ -82,4 +82,27 @@ public class HistoryDb extends SQLiteOpenHelper {
         db.execSQL("DELETE FROM history");
         db.close();
     }
+
+    /** Return {count, sumAmount} untuk hari ini (00:00 - sekarang). */
+    public long[] todayStats() {
+        java.util.Calendar cal = java.util.Calendar.getInstance();
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0);
+        cal.set(java.util.Calendar.MINUTE, 0);
+        cal.set(java.util.Calendar.SECOND, 0);
+        cal.set(java.util.Calendar.MILLISECOND, 0);
+        long start = cal.getTimeInMillis();
+        SQLiteDatabase db = getReadableDatabase();
+        Cursor c = db.rawQuery(
+                "SELECT COUNT(*), IFNULL(SUM(amount),0) FROM history " +
+                        "WHERE time >= ?",
+                new String[]{String.valueOf(start)});
+        long[] out = new long[]{0, 0};
+        if (c.moveToFirst()) {
+            out[0] = c.getLong(0);
+            out[1] = c.getLong(1);
+        }
+        c.close();
+        db.close();
+        return out;
+    }
 }
