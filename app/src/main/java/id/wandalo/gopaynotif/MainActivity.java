@@ -771,6 +771,29 @@ public class MainActivity extends Activity {
     }
 
     /** Daftar aplikasi aktif dengan logo, tiap baris dalam kartu brutal. */
+    /** Tipe pembayaran per aplikasi: - / QRIS / TRANSFER. Ketuk untuk ganti. */
+    private static final String[] PAY_TYPES = {"", "qris", "transfer"};
+    private static final String[] PAY_LABELS = {"-", "QRIS", "TRANSFER"};
+
+    private int payTypeColor(String t) {
+        if ("qris".equals(t)) return BLUE;
+        if ("transfer".equals(t)) return GREEN;
+        return LIGHT_GRAY;
+    }
+
+    private void paintPayButton(Button b, String t) {
+        int idx = 0;
+        for (int i = 0; i < PAY_TYPES.length; i++) {
+            if (PAY_TYPES[i].equals(t)) {
+                idx = i;
+                break;
+            }
+        }
+        b.setText(PAY_LABELS[idx]);
+        b.setTextColor(idx == 0 ? BLACK : WHITE);
+        b.setBackground(brutalBox(payTypeColor(t)));
+    }
+
     private void updateSelected() {
         selectedChips.removeAllViews();
         SharedPreferences prefs = getSharedPreferences("cfg", MODE_PRIVATE);
@@ -784,6 +807,15 @@ public class MainActivity extends Activity {
             selectedChips.addView(tv);
             return;
         }
+
+        TextView typeHint = new TextView(this);
+        typeHint.setText("KETUK LABEL UNTUK ATUR TIPE: QRIS / TRANSFER");
+        typeHint.setTextSize(12);
+        typeHint.setTextColor(GRAY);
+        typeHint.setTypeface(typeHint.getTypeface(), Typeface.BOLD);
+        typeHint.setPadding(4, 0, 0, 10);
+        selectedChips.addView(typeHint);
+
         PackageManager pm = getPackageManager();
         for (String pkg : sel) {
             try {
@@ -812,13 +844,32 @@ public class MainActivity extends Activity {
                 tv.setLayoutParams(new LinearLayout.LayoutParams(
                         0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
 
-                View badge = new View(this);
-                badge.setBackground(brutalBox(GREEN));
-                badge.setLayoutParams(new LinearLayout.LayoutParams(28, 28));
+                Button typeBtn = new Button(this);
+                typeBtn.setTextSize(13);
+                typeBtn.setTypeface(typeBtn.getTypeface(), Typeface.BOLD);
+                typeBtn.setAllCaps(true);
+                typeBtn.setPadding(18, 14, 18, 14);
+                String cur = prefs.getString("app_type_" + pkg, "");
+                paintPayButton(typeBtn, cur);
+                typeBtn.setOnClickListener(v -> {
+                    SharedPreferences p =
+                            getSharedPreferences("cfg", MODE_PRIVATE);
+                    String curT = p.getString("app_type_" + pkg, "");
+                    int idx = 0;
+                    for (int i = 0; i < PAY_TYPES.length; i++) {
+                        if (PAY_TYPES[i].equals(curT)) {
+                            idx = i;
+                            break;
+                        }
+                    }
+                    String next = PAY_TYPES[(idx + 1) % PAY_TYPES.length];
+                    p.edit().putString("app_type_" + pkg, next).apply();
+                    paintPayButton(typeBtn, next);
+                });
 
                 row.addView(iv);
                 row.addView(tv);
-                row.addView(badge);
+                row.addView(typeBtn);
                 selectedChips.addView(brutalWrap(row));
             } catch (Exception ignored) {}
         }

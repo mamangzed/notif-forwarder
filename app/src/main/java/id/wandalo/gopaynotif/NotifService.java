@@ -94,10 +94,12 @@ public class NotifService extends NotificationListenerService {
         String token = prefs.getString("webhook_token", "");
         String deviceId = Webhook.deviceId(this);
         String deviceName = prefs.getString("device_name", Build.MODEL);
+        String payType = prefs.getString("app_type_" + pkg, "");
 
         final String payload = "{\"token\":" + Webhook.jsonStr(token) +
                 ",\"device_id\":" + Webhook.jsonStr(deviceId) +
                 ",\"device_name\":" + Webhook.jsonStr(deviceName) +
+                ",\"pay_type\":" + Webhook.jsonStr(payType) +
                 ",\"source\":" + Webhook.jsonStr(appName) +
                 ",\"package\":" + Webhook.jsonStr(pkg) +
                 ",\"title\":" + Webhook.jsonStr(title) +
